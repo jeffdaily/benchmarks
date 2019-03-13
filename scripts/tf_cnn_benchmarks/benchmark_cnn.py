@@ -285,6 +285,8 @@ flags.DEFINE_boolean('use_numa_affinity', False,
                      'This is probably only useful when --device=cpu.')
 flags.DEFINE_string('trace_file', '',
                     'Enable TensorFlow tracing and write trace to this file.')
+flags.DEFINE_string('trace_prefix', '',
+                    'Enable TensorFlow tracing and write trace to new file for each step.')
 flags.DEFINE_boolean('use_chrome_trace_format', True,
                      'If True, the trace_file, if specified, will be in a '
                      'Chrome trace format. If False, then it will be a '
@@ -808,6 +810,7 @@ def benchmark_one_step(sess,
                        batch_size,
                        step_train_times,
                        trace_filename,
+                       trace_prefix,
                        partitioned_graph_file_prefix,
                        profiler,
                        image_producer,
@@ -820,11 +823,14 @@ def benchmark_one_step(sess,
   should_profile = profiler and 0 <= step < _NUM_STEPS_TO_PROFILE
   need_options_and_metadata = (
       should_profile or collective_graph_key > 0 or
-      ((trace_filename or partitioned_graph_file_prefix) and step == -2)
+      ((trace_filename or partitioned_graph_file_prefix) and step == -2) or
+      (trace_prefix and step >= 0)
   )
   if need_options_and_metadata:
     run_options = tf.RunOptions()
     if (trace_filename and step == -2) or should_profile:
+      run_options.trace_level = tf.RunOptions.FULL_TRACE
+    if (trace_prefix and step >= 0):
       run_options.trace_level = tf.RunOptions.FULL_TRACE
     if partitioned_graph_file_prefix and step == -2:
       run_options.output_partition_graphs = True
@@ -880,6 +886,18 @@ def benchmark_one_step(sess,
       if not gfile.Exists(trace_dir):
         gfile.MakeDirs(trace_dir)
       with gfile.Open(trace_filename, 'w') as trace_file:
+        if params.use_chrome_trace_format:
+          trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+          trace_file.write(trace.generate_chrome_trace_format(show_memory=True))
+        else:
+          trace_file.write(str(run_metadata.step_stats))
+    if trace_prefix and step >= 0:
+      trace_prefix_complete = trace_prefix+str(step)+".json"
+      log_fn('Dumping trace to %s' % trace_prefix_complete)
+      trace_dir = os.path.dirname(trace_prefix_complete)
+      if not gfile.Exists(trace_dir):
+        gfile.MakeDirs(trace_dir)
+      with gfile.Open(trace_prefix_complete, 'w') as trace_file:
         if params.use_chrome_trace_format:
           trace = timeline.Timeline(step_stats=run_metadata.step_stats)
           trace_file.write(trace.generate_chrome_trace_format(show_memory=True))
@@ -1274,6 +1292,7 @@ class BenchmarkCNN(object):
     self.model = model or model_config.get_model_config(
         self.params.model, self.dataset, self.params)
     self.trace_filename = self.params.trace_file
+    self.trace_prefix = self.params.trace_prefix
     self.rewriter_config = self.params.rewriter_config
     autotune_threshold = self.params.autotune_threshold if (
         self.params.autotune_threshold) else 1
@@ -2395,7 +2414,8 @@ class BenchmarkCNN(object):
           sess, graph_info.fetches, local_step,
           self.batch_size * (self.num_workers
                              if self.single_session else 1), step_train_times,
-          self.trace_filename, self.params.partitioned_graph_file_prefix,
+          self.trace_filename, self.trace_prefix,
+          self.params.partitioned_graph_file_prefix,
           profiler, image_producer, self.params, fetch_summary,
           benchmark_logger=self.benchmark_logger,
           collective_graph_key=collective_graph_key)
