@@ -218,6 +218,7 @@ def run_graph(benchmark_op, bench_cnn, init_ops, dummy_loss_op):
           batch_size=None,
           step_train_times=step_train_times,
           trace_filename=bench_cnn.trace_filename,
+          trace_prefix=bench_cnn.trace_prefix,
           partitioned_graph_file_prefix=(
               bench_cnn.params.partitioned_graph_file_prefix),
           profiler=None,
